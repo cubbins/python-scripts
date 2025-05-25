@@ -1,0 +1,136 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import yfinance as yf  # Yahoo Finance API
+
+def compute_moving_averages(series, periods):
+    """Calculate multiple moving averages."""
+    
+    #return {p: series.rolling(window=p).mean() for p in periods}
+    #4. Use a Different Time Window Approach
+    #Instead of using rolling windows of fixed sizes, 
+    #consider an exponential moving average (EMA) to react more quickly to trend changes.
+
+    return {p: series.ewm(span=p, adjust=False).mean() for p in periods}  # EMA instead of SMA
+
+
+def compute_volatility_weights(moving_averages):
+    """Compute volatility-based weights for moving averages."""
+    volatilities = {p: ma.diff().std() for p, ma in moving_averages.items()}  # Rolling standard deviation
+    inverse_vol = {p: 1 / v if v != 0 else 0 for p, v in volatilities.items()}  # Avoid division by zero
+    
+    #total = sum(inverse_vol.values())
+
+    #1. Improve Weight Normalization
+    #Currently, compute_volatility_weights() normalizes weights using total = sum(inverse_vol.values()), but:
+    #If all volatilities are very small, the weights can be over-amplified.
+    #Consider softening normalization using a min threshold.    
+
+    total = sum(inverse_vol.values()) if sum(inverse_vol.values()) != 0 else 1  # Avoid zero division
+
+
+
+    
+    return {p: w / total for p, w in inverse_vol.items()}  # Normalize
+
+def compute_trend_indicator22(moving_averages, weights):
+    """Generate a cumulative trend indicator using moving average comparisons."""
+    periods = sorted(moving_averages.keys())
+    indicator = pd.Series(0, index=moving_averages[periods[0]].index)
+    
+    for i, p1 in enumerate(periods[:-1]):
+        for p2 in periods[i+1:]:
+            comparison = (moving_averages[p1] > moving_averages[p2]).astype(int)
+
+
+            
+            #weighted_comparison = comparison * weights[p1]  # Apply weighting
+            #3. Adjust Weighting for Stronger Trends
+            # Right now, weights are simply added or subtracted, 
+            # but you could scale them dynamically based on the size of the difference between two moving averages.
+            # Refined Code (Scaling by magnitude difference):
+            
+            weighted_comparison = comparison.apply(lambda x: weights[p1] * abs(x) if x > 0 else -weights[p1] * abs(x))
+
+            indicator += weighted_comparison
+    
+    return indicator
+
+def compute_trend_indicator(moving_averages, weights):
+    """Generate a trend indicator using weighted comparisons of moving averages."""
+    periods = sorted(moving_averages.keys())
+    indicator = pd.Series(0, index=moving_averages[periods[0]].index)
+
+    for i, p1 in enumerate(periods[:-1]):
+        for p2 in periods[i+1:]:
+            comparison = moving_averages[p1] - moving_averages[p2]  # Difference instead of boolean
+
+            # Add weight if p1 > p2, subtract weight if p1 < p2
+            weighted_comparison = comparison.apply(lambda x: weights[p1] if x > 0 else -weights[p1])
+
+            indicator += weighted_comparison
+
+    return indicator
+
+
+
+    
+
+
+import pandas as pd
+import yfinance as yf
+
+# Fetch S&P 500 historical data
+sp500 = yf.download('^GSPC', start='2024-01-01', end='2025-05-01')['Close']
+
+#sp500.rename(columns={'Close': 'S&P 500 Close'}, inplace=True)  # Rename for clarity
+
+# Save to disk as CSV file
+sp500.to_csv("sp500_data.csv", index=True)  # Save with index
+
+# Load the CSV file
+df = pd.read_csv("sp500_data.csv", skiprows=1)
+
+# Save the transformed data to a new CSV file
+df.to_csv("formatted_data.csv", index=False)
+
+df = pd.read_csv("formatted_data.csv", header=None, names=["Date", "SimulatedData"])
+
+# Drop the Date column and reset index as a counter starting from 0
+df.drop(columns=["Date"], inplace=True)
+df.reset_index(inplace=True)
+
+# Rename columns to match the desired format
+df.columns = ["Index", "SimulatedData"]
+
+# Add the header row manually
+df.to_csv("converted_data.csv", index=False)
+
+data = pd.read_csv("converted_data.csv", index_col=0)
+
+data = data.iloc[:, 0]  # Convert first column to a Pandas Series
+
+# Ensure it's correctly formatted as a Pandas Series
+data = pd.Series(data, name="SimulatedData")
+
+# Moving averages & trend indicator computations
+moving_avg_periods = list(range(1, 29))  # Expanding to 24 moving averages
+moving_averages = compute_moving_averages(data, moving_avg_periods)
+weights = compute_volatility_weights(moving_averages)
+trend_indicator = compute_trend_indicator(moving_averages, weights)
+
+
+# Plot the updated trend indicator
+plt.figure(figsize=(30, 10))
+plt.plot(trend_indicator, label="Expanded Trend Indicator (24 MAs)", color='blue')
+plt.legend()
+plt.title("Volatility-Weighted Trend Indicator (24 Moving Averages)")
+plt.show()
+
+plt.figure(figsize=(12, 6))  # Make it a better size
+plt.plot(trend_indicator, label="Trend Indicator", color='blue')
+plt.axhline(0, linestyle="--", color="gray")  # Neutral trend line
+plt.grid(True)
+plt.legend()
+plt.title("Volatility-Weighted Trend Indicator (Improved)")
+plt.show()
